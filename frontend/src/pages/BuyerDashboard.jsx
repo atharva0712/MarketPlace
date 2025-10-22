@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardHeader, CardContent } from '../components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Badge } from '../components/ui/badge';
-import ProductCard from '../components/ProductCard';
+import ListingCard from '../components/ListingCard';
 import api from '../utils/api';
 import { toast } from 'sonner';
 import { ShoppingBag, Heart, Package } from 'lucide-react';
@@ -119,7 +119,7 @@ const BuyerDashboard = ({ user }) => {
                     <CardHeader>
                       <div className="flex items-start justify-between">
                         <div>
-                          <h3 className="font-semibold">{order.product_title}</h3>
+                          <h3 className="font-semibold">{order.listing_title}</h3>
                           <p className="text-sm text-muted-foreground mt-1">
                             Order ID: {order.id.slice(0, 8)}...
                           </p>
@@ -168,8 +168,8 @@ const BuyerDashboard = ({ user }) => {
           <TabsContent value="wishlist" className="mt-6">
             {wishlist.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5 md:gap-6" data-testid="wishlist-grid">
-                {wishlist.map((product) => (
-                  <ProductCard key={product.id} product={product} />
+                {wishlist.map((listing) => (
+                  <ListingCard key={listing.id} listing={listing} />
                 ))}
               </div>
             ) : (
@@ -177,7 +177,7 @@ const BuyerDashboard = ({ user }) => {
                 <CardContent className="pt-10 pb-10 text-center">
                   <Heart size={48} className="mx-auto text-muted-foreground mb-4" />
                   <p className="text-lg font-medium">No items in wishlist</p>
-                  <p className="text-muted-foreground">Save products you like to view them later</p>
+                  <p className="text-muted-foreground">Save listings you like to view them later</p>
                 </CardContent>
               </Card>
             )}

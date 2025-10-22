@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import ProductCard from '../components/ProductCard';
+import ListingCard from '../components/ListingCard';
 import api from '../utils/api';
 import { Search, Package, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
@@ -13,25 +13,25 @@ const categories = ['Electronics', 'Fashion', 'Home', 'Books', 'Sports', 'Beauty
 
 const Home = ({ user }) => {
   const navigate = useNavigate();
-  const [products, setProducts] = useState([]);
+  const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
 
   useEffect(() => {
-    fetchProducts();
+    fetchListings();
   }, [selectedCategory]);
 
-  const fetchProducts = async () => {
+  const fetchListings = async () => {
     try {
       setLoading(true);
       const params = {};
       if (selectedCategory) params.category = selectedCategory;
-      const response = await api.get('/products', { params });
-      setProducts(response.data);
+      const response = await api.get('/listings', { params });
+      setListings(response.data);
     } catch (error) {
-      console.error('Error fetching products:', error);
-      toast.error('Failed to load products');
+      console.error('Error fetching listings:', error);
+      toast.error('Failed to load listings');
     } finally {
       setLoading(false);
     }
@@ -43,10 +43,10 @@ const Home = ({ user }) => {
     
     try {
       setLoading(true);
-      const response = await api.get('/products', { params: { search } });
-      setProducts(response.data);
+      const response = await api.get('/listings', { params: { search } });
+      setListings(response.data);
     } catch (error) {
-      console.error('Error searching products:', error);
+      console.error('Error searching listings:', error);
       toast.error('Search failed');
     } finally {
       setLoading(false);
@@ -60,7 +60,7 @@ const Home = ({ user }) => {
         <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
           <div className="text-center space-y-6">
             <h1 className="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-semibold" data-testid="hero-title">
-              Discover New Products
+              Discover New Listings
             </h1>
             <p className="text-base md:text-lg text-muted-foreground max-w-2xl mx-auto">
               Buy and sell new products and services in a trusted marketplace
@@ -70,7 +70,7 @@ const Home = ({ user }) => {
               <div className="flex-1 relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
                 <Input
-                  placeholder="Search products..."
+                  placeholder="Search listings..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="pl-10"
@@ -96,7 +96,7 @@ const Home = ({ user }) => {
         </div>
       </section>
 
-      {/* Filters & Products */}
+      {/* Filters & Listings */}
       <section className="py-10 md:py-14">
         <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
           {/* Categories */}
@@ -122,22 +122,22 @@ const Home = ({ user }) => {
             ))}
           </div>
 
-          {/* Products Grid */}
+          {/* Listings Grid */}
           {loading ? (
             <div className="text-center py-20" data-testid="loading-spinner">
               <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
-              <p className="mt-4 text-muted-foreground">Loading products...</p>
+              <p className="mt-4 text-muted-foreground">Loading listings...</p>
             </div>
-          ) : products.length > 0 ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5 md:gap-6" data-testid="products-grid">
-              {products.map((product) => (
-                <ProductCard key={product.id} product={product} />
+          ) : listings.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5 md:gap-6" data-testid="listings-grid">
+              {listings.map((listing) => (
+                <ListingCard key={listing.id} listing={listing} />
               ))}
             </div>
           ) : (
             <div className="text-center py-20" data-testid="empty-state">
               <Package size={48} className="mx-auto text-muted-foreground mb-4" />
-              <p className="text-lg font-medium">No products found</p>
+              <p className="text-lg font-medium">No listings found</p>
               <p className="text-muted-foreground">Try adjusting your filters or search</p>
             </div>
           )}

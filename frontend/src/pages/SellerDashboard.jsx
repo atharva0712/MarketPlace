@@ -8,7 +8,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import ProductCard from '../components/ProductCard';
+import ListingCard from '../components/ListingCard';
 import api from '../utils/api';
 import { toast } from 'sonner';
 import { Plus, Package, DollarSign, Eye, TrendingUp } from 'lucide-react';
@@ -17,17 +17,18 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 const categories = ['Electronics', 'Fashion', 'Home', 'Books', 'Sports', 'Beauty', 'Toys', 'Services'];
 
 const SellerDashboard = ({ user }) => {
-  const [products, setProducts] = useState([]);
+  const [listings, setListings] = useState([]);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [showAddListing, setShowAddListing] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     price: '',
     category: '',
     images: '',
-    stock: '1'
+    stock: '1',
+    type: 'product'
   });
 
   useEffect(() => {
@@ -36,13 +37,13 @@ const SellerDashboard = ({ user }) => {
 
   const fetchData = async () => {
     try {
-      const [productsRes, ordersRes] = await Promise.all([
-        api.get('/products'),
+      const [listingsRes, ordersRes] = await Promise.all([
+        api.get('/listings'),
         api.get('/orders')
       ]);
       
-      const myProducts = productsRes.data.filter(p => p.seller_id === user.id);
-      setProducts(myProducts);
+      const myListings = listingsRes.data.filter(p => p.seller_id === user.id);
+      setListings(myListings);
       setOrders(ordersRes.data);
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -52,7 +53,7 @@ const SellerDashboard = ({ user }) => {
     }
   };
 
-  const handleAddProduct = async (e) => {
+  const handleAddListing = async (e) => {
     e.preventDefault();
     
     try {
@@ -61,33 +62,41 @@ const SellerDashboard = ({ user }) => {
         images.push('https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400');
       }
 
-      await api.post('/products', {
+      const dataToSend = {
         ...formData,
         price: parseFloat(formData.price),
-        stock: parseInt(formData.stock),
         images,
         tags: []
-      });
+      };
 
-      toast.success('Product added successfully!');
-      setShowAddProduct(false);
+      if (formData.type === 'product') {
+        dataToSend.stock = parseInt(formData.stock);
+      } else {
+        delete dataToSend.stock; // Services don't have stock
+      }
+
+      await api.post('/listings', dataToSend);
+
+      toast.success('Listing added successfully!');
+      setShowAddListing(false);
       setFormData({
         title: '',
         description: '',
         price: '',
         category: '',
         images: '',
-        stock: '1'
+        stock: '1',
+        type: 'product'
       });
       fetchData();
     } catch (error) {
-      console.error('Error adding product:', error);
-      toast.error(error.response?.data?.detail || 'Failed to add product');
+      console.error('Error adding listing:', error);
+      toast.error(error.response?.data?.detail || 'Failed to add listing');
     }
   };
 
   const totalRevenue = orders.reduce((sum, order) => sum + order.total_amount, 0);
-  const totalViews = products.reduce((sum, product) => sum + (product.reviews_count || 0), 0);
+  const totalViews = listings.reduce((sum, listing) => sum + (listing.reviews_count || 0), 0);
 
   // Chart data
   const chartData = [
@@ -114,26 +123,26 @@ const SellerDashboard = ({ user }) => {
             <h1 className="text-3xl font-semibold mb-2">Seller Dashboard</h1>
             <p className="text-muted-foreground">Welcome back, {user.name}!</p>
           </div>
-          <Dialog open={showAddProduct} onOpenChange={setShowAddProduct}>
+          <Dialog open={showAddListing} onOpenChange={setShowAddListing}>
             <DialogTrigger asChild>
-              <Button data-testid="add-product-button">
+              <Button data-testid="add-listing-button">
                 <Plus size={18} className="mr-2" />
-                Add Product
+                Add Listing
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Add New Product</DialogTitle>
+                <DialogTitle>Add New Listing</DialogTitle>
               </DialogHeader>
-              <form onSubmit={handleAddProduct} className="space-y-4" data-testid="add-product-form">
+              <form onSubmit={handleAddListing} className="space-y-4" data-testid="add-listing-form">
                 <div className="space-y-2">
-                  <Label htmlFor="title">Product Title*</Label>
+                  <Label htmlFor="title">Listing Title*</Label>
                   <Input
                     id="title"
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                     required
-                    data-testid="product-title-input"
+                    data-testid="listing-title-input"
                   />
                 </div>
                 <div className="space-y-2">
@@ -144,7 +153,7 @@ const SellerDashboard = ({ user }) => {
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     required
                     rows={4}
-                    data-testid="product-description-input"
+                    data-testid="listing-description-input"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -158,9 +167,30 @@ const SellerDashboard = ({ user }) => {
                       value={formData.price}
                       onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                       required
-                      data-testid="product-price-input"
+                      data-testid="listing-price-input"
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="type">Type*</Label>
+                    <Select
+                      value={formData.type}
+                      onValueChange={(value) => setFormData({ ...formData, type: value })}
+                      required
+                    >
+                      <SelectTrigger data-testid="listing-type-select">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {categories.map((cat) => (
+                          <SelectItem key={cat} value={cat}>
+                            {cat}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                {formData.type === 'product' && (
                   <div className="space-y-2">
                     <Label htmlFor="stock">Stock*</Label>
                     <Input
@@ -170,10 +200,10 @@ const SellerDashboard = ({ user }) => {
                       value={formData.stock}
                       onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
                       required
-                      data-testid="product-stock-input"
+                      data-testid="listing-stock-input"
                     />
                   </div>
-                </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="category">Category*</Label>
                   <Select
@@ -181,7 +211,7 @@ const SellerDashboard = ({ user }) => {
                     onValueChange={(value) => setFormData({ ...formData, category: value })}
                     required
                   >
-                    <SelectTrigger data-testid="product-category-select">
+                    <SelectTrigger data-testid="listing-category-select">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
@@ -200,12 +230,12 @@ const SellerDashboard = ({ user }) => {
                     value={formData.images}
                     onChange={(e) => setFormData({ ...formData, images: e.target.value })}
                     placeholder="https://example.com/image1.jpg, https://example.com/image2.jpg"
-                    data-testid="product-images-input"
+                    data-testid="listing-images-input"
                   />
                   <p className="text-xs text-muted-foreground">Leave empty to use default image</p>
                 </div>
-                <Button type="submit" className="w-full" data-testid="submit-product-button">
-                  Add Product
+                <Button type="submit" className="w-full" data-testid="submit-listing-button">
+                  Add Listing
                 </Button>
               </form>
             </DialogContent>
@@ -221,8 +251,8 @@ const SellerDashboard = ({ user }) => {
                   <Package className="text-primary" size={24} />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold" data-testid="total-products">{products.length}</p>
-                  <p className="text-sm text-muted-foreground">Products</p>
+                  <p className="text-2xl font-bold" data-testid="total-listings">{listings.length}</p>
+                  <p className="text-sm text-muted-foreground">Listings</p>
                 </div>
               </div>
             </CardContent>
@@ -301,26 +331,26 @@ const SellerDashboard = ({ user }) => {
         </Card>
 
         {/* Tabs */}
-        <Tabs defaultValue="products">
+        <Tabs defaultValue="listings">
           <TabsList>
-            <TabsTrigger value="products" data-testid="tab-products">My Products</TabsTrigger>
+            <TabsTrigger value="listings" data-testid="tab-listings">My Listings</TabsTrigger>
             <TabsTrigger value="orders" data-testid="tab-orders">Orders</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="products" className="mt-6">
-            {products.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5 md:gap-6" data-testid="products-grid">
-                {products.map((product) => (
-                  <ProductCard key={product.id} product={product} />
+          <TabsContent value="listings" className="mt-6">
+            {listings.length > 0 ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5 md:gap-6" data-testid="listings-grid">
+                {listings.map((listing) => (
+                  <ListingCard key={listing.id} listing={listing} />
                 ))}
               </div>
             ) : (
               <Card>
                 <CardContent className="pt-10 pb-10 text-center">
                   <Package size={48} className="mx-auto text-muted-foreground mb-4" />
-                  <p className="text-lg font-medium">No products yet</p>
-                  <p className="text-muted-foreground mb-4">Start selling by adding your first product</p>
-                  <Button onClick={() => setShowAddProduct(true)}>Add Product</Button>
+                  <p className="text-lg font-medium">No listings yet</p>
+                  <p className="text-muted-foreground mb-4">Start selling by adding your first listing</p>
+                  <Button onClick={() => setShowAddListing(true)}>Add Listing</Button>
                 </CardContent>
               </Card>
             )}
@@ -334,7 +364,7 @@ const SellerDashboard = ({ user }) => {
                     <CardHeader>
                       <div className="flex items-start justify-between">
                         <div>
-                          <h3 className="font-semibold">{order.product_title}</h3>
+                          <h3 className="font-semibold">{order.listing_title}</h3>
                           <p className="text-sm text-muted-foreground mt-1">
                             Order from: {order.buyer_name}
                           </p>
@@ -372,7 +402,7 @@ const SellerDashboard = ({ user }) => {
                 <CardContent className="pt-10 pb-10 text-center">
                   <TrendingUp size={48} className="mx-auto text-muted-foreground mb-4" />
                   <p className="text-lg font-medium">No orders yet</p>
-                  <p className="text-muted-foreground">Orders will appear here once customers purchase your products</p>
+                  <p className="text-muted-foreground">Orders will appear here once customers purchase your listings</p>
                 </CardContent>
               </Card>
             )}

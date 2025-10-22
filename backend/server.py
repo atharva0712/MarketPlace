@@ -58,7 +58,7 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
-class Product(BaseModel):
+class Listing(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     seller_id: str
@@ -69,22 +69,24 @@ class Product(BaseModel):
     category: str
     images: List[str]
     tags: List[str] = []
-    stock: int = 1
+    stock: Optional[int] = 1
     verified: bool = False
     rating: float = 0.0
     reviews_count: int = 0
+    type: str = "product" # product or service
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-class ProductCreate(BaseModel):
+class ListingCreate(BaseModel):
     title: str
     description: str
     price: float
     category: str
     images: List[str]
     tags: List[str] = []
-    stock: int = 1
+    stock: Optional[int] = 1
+    type: str = "product"
 
-class ProductUpdate(BaseModel):
+class ListingUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     price: Optional[float] = None
@@ -92,11 +94,12 @@ class ProductUpdate(BaseModel):
     images: Optional[List[str]] = None
     tags: Optional[List[str]] = None
     stock: Optional[int] = None
+    type: Optional[str] = None
 
 class Review(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    product_id: str
+    listing_id: str
     user_id: str
     user_name: str
     rating: int
@@ -104,7 +107,7 @@ class Review(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ReviewCreate(BaseModel):
-    product_id: str
+    listing_id: str
     rating: int
     comment: str
 
@@ -114,8 +117,8 @@ class Order(BaseModel):
     buyer_id: str
     buyer_name: str
     seller_id: str
-    product_id: str
-    product_title: str
+    listing_id: str
+    listing_title: str
     quantity: int
     total_amount: float
     status: str = "pending"  # pending, confirmed, shipped, delivered, cancelled
@@ -128,14 +131,14 @@ class Message(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     sender_id: str
     receiver_id: str
-    product_id: Optional[str] = None
+    listing_id: Optional[str] = None
     message: str
     read: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class MessageCreate(BaseModel):
     receiver_id: str
-    product_id: Optional[str] = None
+    listing_id: Optional[str] = None
     message: str
 
 class Thread(BaseModel):
@@ -151,7 +154,7 @@ class Wishlist(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
-    product_id: str
+    listing_id: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class PaymentTransaction(BaseModel):
@@ -241,26 +244,26 @@ async def login(credentials: UserLogin):
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
-# Products
-@api_router.post("/products", response_model=Product)
-async def create_product(product_data: ProductCreate, current_user: User = Depends(get_current_user)):
+# Listings
+@api_router.post("/listings", response_model=Listing)
+async def create_listing(listing_data: ListingCreate, current_user: User = Depends(get_current_user)):
     if current_user.role != "seller":
-        raise HTTPException(status_code=403, detail="Only sellers can create products")
+        raise HTTPException(status_code=403, detail="Only sellers can create listings")
     
-    product = Product(
+    listing = Listing(
         seller_id=current_user.id,
         seller_name=current_user.name,
-        **product_data.model_dump()
+        **listing_data.model_dump()
     )
     
-    product_dict = product.model_dump()
-    product_dict['timestamp'] = product_dict.pop('created_at').isoformat()
+    listing_dict = listing.model_dump()
+    listing_dict['timestamp'] = listing_dict.pop('created_at').isoformat()
     
-    await db.products.insert_one(product_dict)
-    return product
+    await db.listings.insert_one(listing_dict)
+    return listing
 
-@api_router.get("/products", response_model=List[Product])
-async def get_products(category: Optional[str] = None, search: Optional[str] = None, limit: int = 50):
+@api_router.get("/listings", response_model=List[Listing])
+async def get_listings(category: Optional[str] = None, search: Optional[str] = None, limit: int = 50):
     query = {}
     if category:
         query['category'] = category
@@ -270,61 +273,61 @@ async def get_products(category: Optional[str] = None, search: Optional[str] = N
             {'description': {'$regex': search, '$options': 'i'}}
         ]
     
-    products = await db.products.find(query, {"_id": 0}).limit(limit).to_list(limit)
+    listings = await db.listings.find(query, {"_id": 0}).limit(limit).to_list(limit)
     
-    for p in products:
+    for p in listings:
         if isinstance(p.get('timestamp'), str):
             p['created_at'] = datetime.fromisoformat(p.pop('timestamp'))
     
-    return [Product(**p) for p in products]
+    return [Listing(**p) for p in listings]
 
-@api_router.get("/products/{product_id}", response_model=Product)
-async def get_product(product_id: str):
-    product = await db.products.find_one({"id": product_id}, {"_id": 0})
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+@api_router.get("/listings/{listing_id}", response_model=Listing)
+async def get_listing(listing_id: str):
+    listing = await db.listings.find_one({"id": listing_id}, {"_id": 0})
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
     
-    if isinstance(product.get('timestamp'), str):
-        product['created_at'] = datetime.fromisoformat(product.pop('timestamp'))
+    if isinstance(listing.get('timestamp'), str):
+        listing['created_at'] = datetime.fromisoformat(listing.pop('timestamp'))
     
-    return Product(**product)
+    return Listing(**listing)
 
-@api_router.put("/products/{product_id}", response_model=Product)
-async def update_product(product_id: str, product_data: ProductUpdate, current_user: User = Depends(get_current_user)):
-    product = await db.products.find_one({"id": product_id}, {"_id": 0})
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+@api_router.put("/listings/{listing_id}", response_model=Listing)
+async def update_listing(listing_id: str, listing_data: ListingUpdate, current_user: User = Depends(get_current_user)):
+    listing = await db.listings.find_one({"id": listing_id}, {"_id": 0})
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
     
-    if product['seller_id'] != current_user.id:
+    if listing['seller_id'] != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
-    update_data = {k: v for k, v in product_data.model_dump().items() if v is not None}
-    await db.products.update_one({"id": product_id}, {"$set": update_data})
+    update_data = {k: v for k, v in listing_data.model_dump().items() if v is not None}
+    await db.listings.update_one({"id": listing_id}, {"$set": update_data})
     
-    updated = await db.products.find_one({"id": product_id}, {"_id": 0})
+    updated = await db.listings.find_one({"id": listing_id}, {"_id": 0})
     if isinstance(updated.get('timestamp'), str):
         updated['created_at'] = datetime.fromisoformat(updated.pop('timestamp'))
     
-    return Product(**updated)
+    return Listing(**updated)
 
-@api_router.delete("/products/{product_id}")
-async def delete_product(product_id: str, current_user: User = Depends(get_current_user)):
-    product = await db.products.find_one({"id": product_id}, {"_id": 0})
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+@api_router.delete("/listings/{listing_id}")
+async def delete_listing(listing_id: str, current_user: User = Depends(get_current_user)):
+    listing = await db.listings.find_one({"id": listing_id}, {"_id": 0})
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
     
-    if product['seller_id'] != current_user.id:
+    if listing['seller_id'] != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
-    await db.products.delete_one({"id": product_id})
-    return {"message": "Product deleted"}
+    await db.listings.delete_one({"id": listing_id})
+    return {"message": "Listing deleted"}
 
 # Reviews
 @api_router.post("/reviews", response_model=Review)
 async def create_review(review_data: ReviewCreate, current_user: User = Depends(get_current_user)):
-    product = await db.products.find_one({"id": review_data.product_id}, {"_id": 0})
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+    listing = await db.listings.find_one({"id": review_data.listing_id}, {"_id": 0})
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
     
     review = Review(
         user_id=current_user.id,
@@ -337,19 +340,19 @@ async def create_review(review_data: ReviewCreate, current_user: User = Depends(
     
     await db.reviews.insert_one(review_dict)
     
-    # Update product rating
-    reviews = await db.reviews.find({"product_id": review_data.product_id}, {"_id": 0}).to_list(1000)
+    # Update listing rating
+    reviews = await db.reviews.find({"listing_id": review_data.listing_id}, {"_id": 0}).to_list(1000)
     avg_rating = sum(r['rating'] for r in reviews) / len(reviews)
-    await db.products.update_one(
-        {"id": review_data.product_id},
+    await db.listings.update_one(
+        {"id": review_data.listing_id},
         {"$set": {"rating": round(avg_rating, 1), "reviews_count": len(reviews)}}
     )
     
     return review
 
-@api_router.get("/reviews/{product_id}", response_model=List[Review])
-async def get_reviews(product_id: str):
-    reviews = await db.reviews.find({"product_id": product_id}, {"_id": 0}).to_list(1000)
+@api_router.get("/reviews/{listing_id}", response_model=List[Review])
+async def get_reviews(listing_id: str):
+    reviews = await db.reviews.find({"listing_id": listing_id}, {"_id": 0}).to_list(1000)
     
     for r in reviews:
         if isinstance(r.get('timestamp'), str):
@@ -359,22 +362,22 @@ async def get_reviews(product_id: str):
 
 # Orders
 @api_router.post("/orders", response_model=Order)
-async def create_order(product_id: str, quantity: int, current_user: User = Depends(get_current_user)):
-    product = await db.products.find_one({"id": product_id}, {"_id": 0})
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+async def create_order(listing_id: str, quantity: int, current_user: User = Depends(get_current_user)):
+    listing = await db.listings.find_one({"id": listing_id}, {"_id": 0})
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
     
-    if product['stock'] < quantity:
+    if listing.get('type') == "product" and listing['stock'] < quantity:
         raise HTTPException(status_code=400, detail="Insufficient stock")
     
     order = Order(
         buyer_id=current_user.id,
         buyer_name=current_user.name,
-        seller_id=product['seller_id'],
-        product_id=product_id,
-        product_title=product['title'],
+        seller_id=listing['seller_id'],
+        listing_id=listing_id,
+        listing_title=listing['title'],
         quantity=quantity,
-        total_amount=product['price'] * quantity
+        total_amount=listing['price'] * quantity
     )
     
     order_dict = order.model_dump()
@@ -469,36 +472,36 @@ async def get_messages(other_user_id: str, current_user: User = Depends(get_curr
     return sorted([Message(**m) for m in messages], key=lambda x: x.created_at)
 
 # Wishlist
-@api_router.post("/wishlist/{product_id}")
-async def add_to_wishlist(product_id: str, current_user: User = Depends(get_current_user)):
-    existing = await db.wishlist.find_one({"user_id": current_user.id, "product_id": product_id}, {"_id": 0})
+@api_router.post("/wishlist/{listing_id}")
+async def add_to_wishlist(listing_id: str, current_user: User = Depends(get_current_user)):
+    existing = await db.wishlist.find_one({"user_id": current_user.id, "listing_id": listing_id}, {"_id": 0})
     if existing:
         return {"message": "Already in wishlist"}
     
-    wishlist = Wishlist(user_id=current_user.id, product_id=product_id)
+    wishlist = Wishlist(user_id=current_user.id, listing_id=listing_id)
     wishlist_dict = wishlist.model_dump()
     wishlist_dict['timestamp'] = wishlist_dict.pop('created_at').isoformat()
     
     await db.wishlist.insert_one(wishlist_dict)
     return {"message": "Added to wishlist"}
 
-@api_router.delete("/wishlist/{product_id}")
-async def remove_from_wishlist(product_id: str, current_user: User = Depends(get_current_user)):
-    await db.wishlist.delete_one({"user_id": current_user.id, "product_id": product_id})
+@api_router.delete("/wishlist/{listing_id}")
+async def remove_from_wishlist(listing_id: str, current_user: User = Depends(get_current_user)):
+    await db.wishlist.delete_one({"user_id": current_user.id, "listing_id": listing_id})
     return {"message": "Removed from wishlist"}
 
-@api_router.get("/wishlist", response_model=List[Product])
+@api_router.get("/wishlist", response_model=List[Listing])
 async def get_wishlist(current_user: User = Depends(get_current_user)):
     wishlist_items = await db.wishlist.find({"user_id": current_user.id}, {"_id": 0}).to_list(1000)
-    product_ids = [item['product_id'] for item in wishlist_items]
+    listing_ids = [item['listing_id'] for item in wishlist_items]
     
-    products = await db.products.find({"id": {"$in": product_ids}}, {"_id": 0}).to_list(1000)
+    listings = await db.listings.find({"id": {"$in": listing_ids}}, {"_id": 0}).to_list(1000)
     
-    for p in products:
+    for p in listings:
         if isinstance(p.get('timestamp'), str):
             p['created_at'] = datetime.fromisoformat(p.pop('timestamp'))
     
-    return [Product(**p) for p in products]
+    return [Listing(**p) for p in listings]
 
 # Payments
 
@@ -526,7 +529,7 @@ async def create_checkout_session(order_id: str, request: Request, current_user:
                     'price_data': {
                         'currency': 'usd',
                         'product_data': {
-                            'name': order['product_title'],
+                            'name': order['listing_title'],
                         },
                         'unit_amount': int(order['total_amount'] * 100),
                     },
@@ -587,8 +590,8 @@ async def get_checkout_status(session_id: str, current_user: User = Depends(get_
                 # Reduce stock
                 order = await db.orders.find_one({"id": transaction['order_id']}, {"_id": 0})
                 if order:
-                    await db.products.update_one(
-                        {"id": order['product_id']},
+                    await db.listings.update_one(
+                        {"id": order['listing_id']},
                         {"$inc": {"stock": -order['quantity']}}
                     )
         

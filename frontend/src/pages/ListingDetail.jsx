@@ -8,29 +8,29 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Avatar, AvatarFallback } from '../components/ui/avatar';
 import api from '../utils/api';
 import { toast } from 'sonner';
-import { ShoppingCart, Star, Package, ShieldCheck, Heart } from 'lucide-react';
+import { ShoppingCart, Star, Package, ShieldCheck, Heart, CalendarCheck } from 'lucide-react';
 
-const ProductDetail = ({ user }) => {
+const ListingDetail = ({ user }) => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [product, setProduct] = useState(null);
+  const [listing, setListing] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
 
   useEffect(() => {
-    fetchProduct();
+    fetchListing();
     fetchReviews();
   }, [id]);
 
-  const fetchProduct = async () => {
+  const fetchListing = async () => {
     try {
-      const response = await api.get(`/products/${id}`);
-      setProduct(response.data);
+      const response = await api.get(`/listings/${id}`);
+      setListing(response.data);
     } catch (error) {
-      console.error('Error fetching product:', error);
-      toast.error('Failed to load product');
+      console.error('Error fetching listing:', error);
+      toast.error('Failed to load listing');
     } finally {
       setLoading(false);
     }
@@ -45,21 +45,21 @@ const ProductDetail = ({ user }) => {
     }
   };
 
-  const handleBuyNow = async () => {
+  const handleOrder = async () => {
     if (!user) {
-      toast.error('Please login to purchase');
+      toast.error('Please login to proceed');
       navigate('/login');
       return;
     }
 
     if (user.role !== 'buyer') {
-      toast.error('Only buyers can purchase products');
+      toast.error('Only buyers can purchase/book listings');
       return;
     }
 
     try {
-      const response = await api.post(`/orders?product_id=${id}&quantity=${quantity}`);
-      toast.success('Order created! Redirecting to checkout...');
+      const response = await api.post(`/orders?listing_id=${id}&quantity=${quantity}`);
+      toast.success(`Order created! Redirecting to checkout...`);
       navigate(`/checkout/${response.data.id}`);
     } catch (error) {
       console.error('Error creating order:', error);
@@ -91,18 +91,18 @@ const ProductDetail = ({ user }) => {
     );
   }
 
-  if (!product) {
+  if (!listing) {
     return (
       <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
         <div className="text-center">
           <Package size={48} className="mx-auto text-muted-foreground mb-4" />
-          <p className="text-lg font-medium">Product not found</p>
+          <p className="text-lg font-medium">Listing not found</p>
         </div>
       </div>
     );
   }
 
-  const images = product.images?.length > 0 ? product.images : ['https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800'];
+  const images = listing.images?.length > 0 ? listing.images : ['https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800'];
 
   return (
     <div className="min-h-[calc(100vh-4rem)] py-10">
@@ -110,10 +110,10 @@ const ProductDetail = ({ user }) => {
         <div className="grid md:grid-cols-2 gap-8 lg:gap-12">
           {/* Images */}
           <div className="space-y-4">
-            <div className="aspect-square rounded-xl overflow-hidden bg-muted" data-testid="product-main-image">
+            <div className="aspect-square rounded-xl overflow-hidden bg-muted" data-testid="listing-main-image">
               <img
                 src={images[selectedImage]}
-                alt={product.title}
+                alt={listing.title}
                 className="w-full h-full object-cover"
               />
             </div>
@@ -126,28 +126,28 @@ const ProductDetail = ({ user }) => {
                       selectedImage === idx ? 'border-primary' : 'border-transparent'
                     }`}
                     onClick={() => setSelectedImage(idx)}
-                    data-testid={`product-thumbnail-${idx}`}
+                    data-testid={`listing-thumbnail-${idx}`}
                   >
-                    <img src={img} alt={`${product.title} ${idx + 1}`} className="w-full h-full object-cover" />
+                    <img src={img} alt={`${listing.title} ${idx + 1}`} className="w-full h-full object-cover" />
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* Product Info */}
+          {/* Listing Info */}
           <div className="space-y-6">
             <div>
               <div className="flex items-start justify-between gap-4 mb-2">
-                <h1 className="text-3xl font-semibold" data-testid="product-title">{product.title}</h1>
-                {product.verified && <ShieldCheck className="text-emerald-500 flex-shrink-0" size={24} />}
+                <h1 className="text-3xl font-semibold" data-testid="listing-title">{listing.title}</h1>
+                {listing.verified && <ShieldCheck className="text-emerald-500 flex-shrink-0" size={24} />}
               </div>
               <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                <span>By {product.seller_name}</span>
-                {product.rating > 0 && (
+                <span>By {listing.seller_name}</span>
+                {listing.rating > 0 && (
                   <div className="flex items-center gap-1">
                     <Star size={14} fill="currentColor" className="text-amber-500" />
-                    <span>{product.rating} ({product.reviews_count} reviews)</span>
+                    <span>{listing.rating} ({listing.reviews_count} reviews)</span>
                   </div>
                 )}
               </div>
@@ -156,49 +156,63 @@ const ProductDetail = ({ user }) => {
             <Separator />
 
             <div>
-              <div className="text-3xl font-bold" data-testid="product-price">${product.price.toFixed(2)}</div>
-              <Badge className="mt-2">{product.category}</Badge>
+              <div className="text-3xl font-bold" data-testid="listing-price">${listing.price.toFixed(2)}</div>
+              <Badge className="mt-2">{listing.category}</Badge>
             </div>
 
-            {product.stock > 0 ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <label className="text-sm font-medium">Quantity:</label>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                      data-testid="decrease-quantity"
-                    >
-                      -
+            {listing.type === "product" ? (
+              listing.stock > 0 ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm font-medium">Quantity:</label>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                        data-testid="decrease-quantity"
+                      >
+                        -
+                      </Button>
+                      <span className="w-12 text-center" data-testid="quantity-display">{quantity}</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setQuantity(Math.min(listing.stock, quantity + 1))}
+                        data-testid="increase-quantity"
+                      >
+                        +
+                      </Button>
+                    </div>
+                    <span className="text-sm text-muted-foreground">({listing.stock} available)</span>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <Button className="flex-1" onClick={handleOrder} data-testid="buy-now-button">
+                      <ShoppingCart size={18} className="mr-2" />
+                      Buy Now
                     </Button>
-                    <span className="w-12 text-center" data-testid="quantity-display">{quantity}</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setQuantity(Math.min(product.stock, quantity + 1))}
-                      data-testid="increase-quantity"
-                    >
-                      +
+                    <Button variant="outline" size="icon" onClick={handleAddToWishlist} data-testid="wishlist-button">
+                      <Heart size={18} />
                     </Button>
                   </div>
-                  <span className="text-sm text-muted-foreground">({product.stock} available)</span>
                 </div>
-
+              ) : (
+                <div className="p-4 bg-destructive/10 rounded-lg" data-testid="out-of-stock">
+                  <p className="text-destructive font-medium">Out of Stock</p>
+                </div>
+              )
+            ) : ( // listing.type === "service"
+              <div className="space-y-3">
                 <div className="flex gap-3">
-                  <Button className="flex-1" onClick={handleBuyNow} data-testid="buy-now-button">
-                    <ShoppingCart size={18} className="mr-2" />
-                    Buy Now
+                  <Button className="flex-1" onClick={handleOrder} data-testid="book-now-button">
+                    <CalendarCheck size={18} className="mr-2" />
+                    Book Now
                   </Button>
                   <Button variant="outline" size="icon" onClick={handleAddToWishlist} data-testid="wishlist-button">
                     <Heart size={18} />
                   </Button>
                 </div>
-              </div>
-            ) : (
-              <div className="p-4 bg-destructive/10 rounded-lg" data-testid="out-of-stock">
-                <p className="text-destructive font-medium">Out of Stock</p>
               </div>
             )}
           </div>
@@ -213,7 +227,7 @@ const ProductDetail = ({ user }) => {
           <TabsContent value="description" className="mt-6">
             <Card>
               <CardContent className="pt-6">
-                <p className="text-muted-foreground leading-7" data-testid="product-description">{product.description}</p>
+                <p className="text-muted-foreground leading-7" data-testid="listing-description">{listing.description}</p>
               </CardContent>
             </Card>
           </TabsContent>
@@ -255,7 +269,7 @@ const ProductDetail = ({ user }) => {
               ) : (
                 <Card>
                   <CardContent className="pt-6 text-center text-muted-foreground">
-                    No reviews yet. Be the first to review this product!
+                    No reviews yet. Be the first to review this listing!
                   </CardContent>
                 </Card>
               )}
@@ -267,4 +281,4 @@ const ProductDetail = ({ user }) => {
   );
 };
 
-export default ProductDetail;
+export default ListingDetail;

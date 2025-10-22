@@ -6,7 +6,7 @@ import { getToken, getUser } from './utils/auth';
 
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
-import ProductDetail from './pages/ProductDetail';
+import ListingDetail from './pages/ListingDetail';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import BuyerDashboard from './pages/BuyerDashboard';
@@ -51,7 +51,7 @@ function App() {
         <Navbar user={user} setUser={setUser} />
         <Routes>
           <Route path="/" element={<Home user={user} />} />
-          <Route path="/product/:id" element={<ProductDetail user={user} />} />
+          <Route path="/listing/:id" element={<ListingDetail user={user} />} />
           <Route path="/login" element={user ? <Navigate to="/" /> : <Login setUser={setUser} />} />
           <Route path="/register" element={user ? <Navigate to="/" /> : <Register setUser={setUser} />} />
           
