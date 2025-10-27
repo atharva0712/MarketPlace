@@ -1,10 +1,12 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import shutil
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional, Dict, Any
@@ -13,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from passlib.context import CryptContext
 import jwt
 import stripe
+import json
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -32,9 +35,57 @@ STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')
 stripe.api_key = STRIPE_API_KEY
 
+# Create uploads directory
+UPLOAD_DIR = ROOT_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
 # Create the main app
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
+
+# ============ WebSocket Connection Manager ============
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, user_id: str):
+        await websocket.accept()
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = []
+        self.active_connections[user_id].append(websocket)
+        print(f"✅ User connected: {user_id}")
+        await self.broadcast_online_users()
+
+    async def disconnect(self, websocket: WebSocket, user_id: str):
+        if user_id in self.active_connections:
+            self.active_connections[user_id].remove(websocket)
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+        print(f"❌ User disconnected: {user_id}")
+        await self.broadcast_online_users()
+
+    async def send_personal_message(self, receiver_id: str, message: dict):
+        if receiver_id in self.active_connections:
+            for connection in self.active_connections[receiver_id]:
+                try:
+                    await connection.send_text(json.dumps(message))
+                except:
+                    pass
+
+    async def broadcast(self, message: dict):
+        for user_connections in self.active_connections.values():
+            for connection in user_connections:
+                try:
+                    await connection.send_text(json.dumps(message))
+                except:
+                    pass
+
+    async def broadcast_online_users(self):
+        online_users = list(self.active_connections.keys())
+        message = {"type": "online_users", "users": online_users}
+        await self.broadcast(message)
+
+connection_manager = ConnectionManager()
 
 # ============ Models ============
 
@@ -43,7 +94,7 @@ class User(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     email: EmailStr
     name: str
-    role: str = "buyer"  # buyer or seller
+    role: str = "buyer"
     avatar: Optional[str] = None
     verified: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -73,7 +124,7 @@ class Listing(BaseModel):
     verified: bool = False
     rating: float = 0.0
     reviews_count: int = 0
-    type: str = "product" # product or service
+    type: str = "product"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ListingCreate(BaseModel):
@@ -121,7 +172,7 @@ class Order(BaseModel):
     listing_title: str
     quantity: int
     total_amount: float
-    status: str = "pending"  # pending, confirmed, shipped, delivered, cancelled
+    status: str = "pending"
     payment_status: str = "pending"
     session_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -133,6 +184,9 @@ class Message(BaseModel):
     receiver_id: str
     listing_id: Optional[str] = None
     message: str
+    file_url: Optional[str] = None
+    file_type: Optional[str] = None
+    file_name: Optional[str] = None
     read: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -140,6 +194,9 @@ class MessageCreate(BaseModel):
     receiver_id: str
     listing_id: Optional[str] = None
     message: str
+    file_url: Optional[str] = None
+    file_type: Optional[str] = None
+    file_name: Optional[str] = None
 
 class Thread(BaseModel):
     id: str
@@ -340,7 +397,6 @@ async def create_review(review_data: ReviewCreate, current_user: User = Depends(
     
     await db.reviews.insert_one(review_dict)
     
-    # Update listing rating
     reviews = await db.reviews.find({"listing_id": review_data.listing_id}, {"_id": 0}).to_list(1000)
     avg_rating = sum(r['rating'] for r in reviews) / len(reviews)
     await db.listings.update_one(
@@ -367,7 +423,7 @@ async def create_order(listing_id: str, quantity: int, current_user: User = Depe
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
     
-    if listing.get('type') == "product" and listing['stock'] < quantity:
+    if listing.get('type') == "product" and listing.get('stock', 0) < quantity:
         raise HTTPException(status_code=400, detail="Insufficient stock")
     
     order = Order(
@@ -397,57 +453,12 @@ async def get_orders(current_user: User = Depends(get_current_user)):
     
     return [Order(**o) for o in orders]
 
-# Messages
-@api_router.post("/messages", response_model=Message)
-async def send_message(message_data: MessageCreate, current_user: User = Depends(get_current_user)):
-    message = Message(
-        sender_id=current_user.id,
-        **message_data.model_dump()
-    )
-    
-    message_dict = message.model_dump()
-    message_dict['timestamp'] = message_dict.pop('created_at').isoformat()
-    
-    await db.messages.insert_one(message_dict)
-    return message
-
-@api_router.get("/messages/threads", response_model=List[Thread])
-async def get_threads(current_user: User = Depends(get_current_user)):
-    messages = await db.messages.find(
-        {"$or": [{"sender_id": current_user.id}, {"receiver_id": current_user.id}]},
-        {"_id": 0}
-    ).to_list(10000)
-    
-    threads_map = {}
-    for msg in messages:
-        other_id = msg['receiver_id'] if msg['sender_id'] == current_user.id else msg['sender_id']
-        
-        if other_id not in threads_map:
-            threads_map[other_id] = {
-                "messages": [],
-                "unread": 0
-            }
-        
-        threads_map[other_id]["messages"].append(msg)
-        if msg['receiver_id'] == current_user.id and not msg['read']:
-            threads_map[other_id]["unread"] += 1
-    
-    threads = []
-    for other_id, data in threads_map.items():
-        other_user = await db.users.find_one({"id": other_id}, {"_id": 0, "password": 0})
-        if other_user:
-            last_msg = sorted(data["messages"], key=lambda x: x['timestamp'] if isinstance(x['timestamp'], str) else x['created_at'].isoformat(), reverse=True)[0]
-            threads.append(Thread(
-                id=other_id,
-                other_user_id=other_id,
-                other_user_name=other_user['name'],
-                other_user_avatar=other_user.get('avatar'),
-                last_message=last_msg['message'],
-                last_message_time=datetime.fromisoformat(last_msg['timestamp']) if isinstance(last_msg.get('timestamp'), str) else last_msg['created_at'],
-                unread_count=data["unread"]
-            ))
-    
-    return sorted(threads, key=lambda x: x.last_message_time, reverse=True)
+# Messages & Chat
+@api_router.get("/users", response_model=List[User])
+async def get_users(current_user: User = Depends(get_current_user)):
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
+    filtered_users = [User(**u) for u in users if u["id"] != current_user.id]
+    return filtered_users
 
 @api_router.get("/messages/{other_user_id}", response_model=List[Message])
 async def get_messages(other_user_id: str, current_user: User = Depends(get_current_user)):
@@ -459,7 +470,6 @@ async def get_messages(other_user_id: str, current_user: User = Depends(get_curr
         {"_id": 0}
     ).to_list(10000)
     
-    # Mark as read
     await db.messages.update_many(
         {"sender_id": other_user_id, "receiver_id": current_user.id},
         {"$set": {"read": True}}
@@ -470,6 +480,30 @@ async def get_messages(other_user_id: str, current_user: User = Depends(get_curr
             m['created_at'] = datetime.fromisoformat(m.pop('timestamp'))
     
     return sorted([Message(**m) for m in messages], key=lambda x: x.created_at)
+
+@api_router.post("/upload")
+async def upload_file(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    try:
+        file.file.seek(0, 2)
+        file_size = file.file.tell()
+        file.file.seek(0)
+        
+        if file_size > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File size must be less than 10MB")
+        
+        file_extension = file.filename.split(".")[-1] if "." in file.filename else ""
+        unique_filename = f"{uuid.uuid4()}.{file_extension}"
+        file_path = UPLOAD_DIR / unique_filename
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        file_url = f"http://localhost:8000/uploads/{unique_filename}"
+        return {"file_url": file_url, "file_name": file.filename}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
 
 # Wishlist
 @api_router.post("/wishlist/{listing_id}")
@@ -504,7 +538,6 @@ async def get_wishlist(current_user: User = Depends(get_current_user)):
     return [Listing(**p) for p in listings]
 
 # Payments
-
 class CheckoutSessionResponse(BaseModel):
     session_id: str
     url: str
@@ -524,25 +557,20 @@ async def create_checkout_session(order_id: str, request: Request, current_user:
 
     try:
         checkout_session = stripe.checkout.Session.create(
-            line_items=[
-                {
-                    'price_data': {
-                        'currency': 'usd',
-                        'product_data': {
-                            'name': order['listing_title'],
-                        },
-                        'unit_amount': int(order['total_amount'] * 100),
-                    },
-                    'quantity': order['quantity'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {'name': order['listing_title']},
+                    'unit_amount': int(order['total_amount'] * 100),
                 },
-            ],
+                'quantity': order['quantity'],
+            }],
             mode='payment',
             success_url=success_url,
             cancel_url=cancel_url,
             metadata={"order_id": order_id, "buyer_id": current_user.id}
         )
 
-        # Create payment transaction
         transaction = PaymentTransaction(
             session_id=checkout_session.id,
             order_id=order_id,
@@ -563,8 +591,6 @@ async def create_checkout_session(order_id: str, request: Request, current_user:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
 class CheckoutStatusResponse(BaseModel):
     payment_status: str
 
@@ -574,7 +600,6 @@ async def get_checkout_status(session_id: str, current_user: User = Depends(get_
         session = stripe.checkout.Session.retrieve(session_id)
         payment_status = session.payment_status
 
-        # Update transaction and order if paid
         if payment_status == "paid":
             transaction = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
             if transaction and transaction['payment_status'] != "paid":
@@ -587,7 +612,6 @@ async def get_checkout_status(session_id: str, current_user: User = Depends(get_
                     {"$set": {"payment_status": "paid", "status": "confirmed"}}
                 )
                 
-                # Reduce stock
                 order = await db.orders.find_one({"id": transaction['order_id']}, {"_id": 0})
                 if order:
                     await db.listings.update_one(
@@ -599,7 +623,6 @@ async def get_checkout_status(session_id: str, current_user: User = Depends(get_
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
     payload = await request.body()
@@ -609,14 +632,9 @@ async def stripe_webhook(request: Request):
         event = stripe.Webhook.construct_event(
             payload=payload, sig_header=sig_header, secret=STRIPE_WEBHOOK_SECRET
         )
-    except ValueError as e:
-        # Invalid payload
-        raise HTTPException(status_code=400, detail=str(e))
-    except stripe.error.SignatureVerificationError as e:
-        # Invalid signature
-        raise HTTPException(status_code=400, detail=str(e))
+    except:
+        raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # Handle the event
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
         session_id = session['id']
@@ -636,7 +654,47 @@ async def stripe_webhook(request: Request):
 
     return {"status": "success"}
 
-# ============ Include Router ============
+# WebSocket for Chat
+@app.websocket("/ws/chat/{user_id}")
+async def chat_endpoint(websocket: WebSocket, user_id: str):
+    await connection_manager.connect(websocket, user_id)
+    
+    try:
+        while True:
+            data = await websocket.receive_json()
+            receiver_id = data.get("receiver_id")
+            message_text = data.get("message", "")
+            file_url = data.get("file_url")
+            file_type = data.get("file_type")
+            file_name = data.get("file_name")
+
+            message_doc = {
+                "id": str(uuid.uuid4()),
+                "sender_id": user_id,
+                "receiver_id": receiver_id,
+                "message": message_text,
+                "file_url": file_url,
+                "file_type": file_type,
+                "file_name": file_name,
+                "read": False,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            
+            await db.messages.insert_one(message_doc.copy())
+
+            ws_message = {"type": "chat", "data": message_doc}
+            
+            await connection_manager.send_personal_message(receiver_id, ws_message)
+            await websocket.send_json(ws_message)
+
+    except WebSocketDisconnect:
+        await connection_manager.disconnect(websocket, user_id)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        await connection_manager.disconnect(websocket, user_id)
+
+# Include router and mount static files
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 app.include_router(api_router)
 
 app.add_middleware(
